@@ -39,6 +39,7 @@ client.on('guildMemberAdd', async (member) => {
     }));
 
     // Send to your REST API
+    console.log('📤 Sending invite data to:', process.env.API_URL);
     const response = await fetch(process.env.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
