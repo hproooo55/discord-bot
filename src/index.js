@@ -1,10 +1,7 @@
 import { Client, GatewayIntentBits } from 'discord.js';
-import dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import 'dotenv/config';
 
-dotenv.config();
-
-const countedUsers = new Set();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -13,49 +10,56 @@ const client = new Client({
   ],
 });
 
-client.once('ready', () => {
-  console.log(`✅ Bot logged in as ${client.user.tag}`);
-});
+let cachedInvites = new Map();
+const countedUsers = new Set(); // To avoid duplicate joins
 
-client.on('guildMemberAdd', async (member) => {
-  const userId = member.user.id;
-  const guild = member.guild;
+client.once('ready', async () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
-  // Skip if already counted
-  if (countedUsers.has(userId)) return;
-
-  // Mark user as counted
-  countedUsers.add(userId);
+  const guild = client.guilds.cache.get(process.env.GUILD_ID);
+  if (!guild) return console.error('❌ Guild not found');
 
   try {
-    // Fetch latest invites
     const invites = await guild.invites.fetch();
+    cachedInvites = new Map(invites.map(inv => [inv.code, inv.uses]));
+    console.log('✅ Cached invites');
+  } catch (err) {
+    console.error('❌ Error fetching invites:', err);
+  }
+});
 
-    const inviteData = invites.map(invite => ({
-      code: invite.code,
-      uses: invite.uses,
-      inviter: invite.inviter?.tag || 'Unknown',
-      inviterId: invite.inviter?.id || null,
+client.on('guildMemberAdd', async member => {
+  if (countedUsers.has(member.id)) return;
+  countedUsers.add(member.id);
+
+  const guild = member.guild;
+
+  try {
+    const newInvites = await guild.invites.fetch();
+    cachedInvites = new Map(newInvites.map(inv => [inv.code, inv.uses]));
+
+    const fullInviteData = [...newInvites.values()].map(inv => ({
+      inviter: inv.inviter?.tag || 'Unknown',
+      code: inv.code,
+      uses: inv.uses,
     }));
 
-    // Send to your REST API
-    console.log('📤 Sending invite data to:', process.env.API_URL);
-    const response = await fetch(process.env.API_URL, {
+    console.log('📤 Sending full invite data for:', member.user.tag);
+
+    const res = await fetch(process.env.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        newUser: {
-          id: userId,
-          tag: member.user.tag,
-        },
-        invites: inviteData,
+        joinedUser: member.user.tag,
+        joinedUserId: member.id,
+        invites: fullInviteData,
       }),
     });
 
-    const data = await response.json();
-    console.log('📤 Sent invite data to API:', data);
-  } catch (error) {
-    console.error('❌ Failed to send invite data:', error);
+    const result = await res.json();
+    console.log('✅ API response:', result);
+  } catch (err) {
+    console.error('❌ Error sending invite data:', err);
   }
 });
 
